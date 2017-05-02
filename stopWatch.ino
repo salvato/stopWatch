@@ -70,6 +70,7 @@ enum commands {
   AreYouThere    = 0xAA,
   Stop           = 0x01,
   Start          = 0x02,
+  Start14        = 0x04,
   NewPeriod      = 0x11,
   RadioInfo      = 0x21,
   StopSending    = 0x81
@@ -92,10 +93,12 @@ long          msec;
 long          elapsed;
 long          iDiv= 50;
 
-volatile long playTime;
 volatile bool bPlaying;          
+long          possessTime24;
+long          possessTime14;
+
+volatile long playTime;
 volatile long possessTime;
-long          timeOfPossess;
 
 int           endPossessPin = 3;
 int           endGamePin    = 4;
@@ -129,9 +132,11 @@ setup() {
     digitalWrite(endPossessPin, LOW);
     digitalWrite(endGamePin, LOW);
     
-    playTime = 10L * 60L * 100L;
-    possessTime = 24L * 100L;
-    timeOfPossess = possessTime;
+    possessTime14 = 14L * 100L;
+    possessTime24 = 24L * 100L;
+
+    playTime      = 10L * 60L * 100L;
+    possessTime   = possessTime24;
     
     // Set Timer1 on CTC mode: Clear Timer on Compare match.
     //
@@ -186,8 +191,6 @@ ISR(TIMER1_COMPA_vect) {
           noTone(endSigTonePin);
           tone(endSigTonePin, endGamToneFrq, endGamSigDur);
           bPlaying = false;
-          bSendTime = false; 
-
       }
   }
 }
@@ -223,9 +226,22 @@ check_radio(void) {
             interrupts(); 
         }
         else if((got_cmd == Start) && !bPlaying && (playTime > 0)) {
+            bSendTime = true;
             digitalWrite(endPossessPin, LOW);
-            if(playTime > timeOfPossess)
-                possessTime = timeOfPossess;
+            if(playTime > possessTime24)
+                possessTime = possessTime24;
+            else
+                possessTime = playTime;
+            noInterrupts();
+            bPlaying = true;
+            TCCR1B |= (1 << CS12); // start the counter (i.e. the 256 prescaler) 
+            interrupts(); 
+        }
+        else if((got_cmd == Start14) && !bPlaying && (playTime > 0)) {
+            bSendTime = true;
+            digitalWrite(endPossessPin, LOW);
+            if(playTime > possessTime14)
+                possessTime = possessTime14;
             else
                 possessTime = playTime;
             noInterrupts();
@@ -254,10 +270,12 @@ loop() {
           val = val >> 8;
       }   
       val = playTime;
+      if(val == 0)
+        bSendTime = false;  
       for(int i=0; i<4; i++) {
           Serial.write(val & 0xFF);
           val = val >> 8;
-      }   
+      }
       msec += iDiv;
   }
 }
@@ -287,30 +305,13 @@ executeCommand(String inputString) {
         bSendTime = true;
         return;
     }
-    
-    if(command == char(Start)) {
-        digitalWrite(endPossessPin, LOW);
-        possessTime = long(inputString.charAt(1)) * 100L;
-        noInterrupts();        // disable all interrupts
-        bPlaying = true;
-        TCCR1B |= (1 << CS12); // 256 prescaler
-        interrupts();          // enable all interrupts
-        return;
-    }
-    
-    if(command == char(Stop)) {
-        noInterrupts();         // disable all interrupts
-        bPlaying = false;
-        TCCR1B &= ~(1 << CS12); // stop the counter (i.e. the 256 prescaler) 
-        interrupts();           // enable all interrupts 
-        return;
-    }
 
     if(command == char(NewPeriod)) {
         digitalWrite(endGamePin, LOW);
+        digitalWrite(endPossessPin, LOW);
         playTime = long(inputString.charAt(1)) * 60L * 100L;
         possessTime = long(inputString.charAt(2)) * 100L;
-        timeOfPossess = possessTime;
+        bSendTime = true;
         return;
     }
 
