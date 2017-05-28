@@ -62,7 +62,7 @@
 // 13 SCK
 
 void serialEvent();
-void executeCommand(String inputString);
+void executeCommand(byte* inputString);
 void check_radio(void);
 
 
@@ -78,13 +78,14 @@ enum commands {
 
 
 
-char          command;
+byte          command;
 
-char          ACK  = char(0xFF);
-char          EOS  = char(127);
-char          ack  = ACK;
+byte          ACK  = byte(0xFF);
+byte          EOS  = byte(127);
+byte          ack  = ACK;
 
-String        inputString    = "";        // a string to hold incoming data
+byte          inputString[255];        // an array to hold incoming data
+int           nChar=0;
 boolean       stringComplete = false;  // whether the string is complete
 long          baudRate       = 115200;
 
@@ -122,7 +123,6 @@ byte address[][5] = { 0x01,0x23,0x45,0x67,0x89,
 void 
 setup() {
     Serial.begin(baudRate, SERIAL_8N1); // initialize serial: 8 data bits, no parity, one stop bit.
-    inputString.reserve(200);           // reserve 200 bytes for the inputString:
     bSendTime = false;
     bPlaying = false;
     
@@ -259,7 +259,7 @@ loop() {
   serialEvent(); //call the function
   if(stringComplete) {
     executeCommand(inputString);
-    inputString = "";// clear the string:
+    nChar = 0;
     stringComplete = false;
   }
   elapsed = millis();
@@ -286,10 +286,10 @@ loop() {
 // Multiple bytes of data may be available.
 void 
 serialEvent() {
-    while (Serial.available()) {
-        char inChar = (char)Serial.read();
-        inputString += inChar;
-        if (inChar == EOS) {
+    while(Serial.available()) {
+        byte inChar = (byte)Serial.read();
+        inputString[nChar++] = inChar;
+        if (inChar == (byte)EOS) {
             stringComplete = true;
         }
     }
@@ -297,35 +297,41 @@ serialEvent() {
 
 
 void
-executeCommand(String inputString) {
-    command = inputString.charAt(0);
-    if(command == char(AreYouThere)) {// Are you ? 
-        Serial.write(ACK);
+executeCommand(byte* inputString) {
+    command = inputString[0];
+    if(command == byte(AreYouThere)) {// Are you ? 
+        Serial.write(byte(ACK));
         delay(1000);// Don't start sendig immediately
         bSendTime = true;
         return;
     }
 
-    if(command == char(NewPeriod)) {
+    else if(command == byte(NewPeriod)) {
         digitalWrite(endGamePin, LOW);
         digitalWrite(endPossessPin, LOW);
-        playTime = long(inputString.charAt(1)) * 60L * 100L;
-        possessTime = long(inputString.charAt(2)) * 100L;
-        bSendTime = true;
+        if(nChar > 2) {
+            playTime = long(inputString[1]) * 60L * 100L;
+            possessTime = long(inputString[2]) * 100L;
+            bSendTime = true;
+        }
+        else {
+            Serial.write(byte(EOS));
+        }
         return;
     }
 
-    if(command == char(StopSending)) {
+    else if(command == char(StopSending)) {
         bSendTime = false; 
         digitalWrite(endPossessPin, LOW);
         return;
     }
-/*
-    while(true) {
-        digitalWrite(endPossessPin, digitalRead(endPossessPin) ^ 1);
-        delay(1000);
-    }
-*/
+    
+//    else {
+//        while(true) {
+//            digitalWrite(endPossessPin, digitalRead(endPossessPin) ^ 1);
+//            delay(100);
+//        }
+//    }
 }
 
 
