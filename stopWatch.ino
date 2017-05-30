@@ -61,35 +61,66 @@
 // 12 MISO
 // 13 SCK
 
+
+#define BASKET      1
+#define HANDBALL    2
+
+//////////////////////////////////////////////////////////
+// Fuction prototypes
+//////////////////////////////////////////////////////////
+
 void serialEvent();
-void executeCommand(byte* inputString);
+bool executeCommand();
 void check_radio(void);
+void decodeCommand(byte *inputString, byte *decodedString);
+void errorSignal();
+void sendTime();
+void sendPossess();
 
 
 enum commands {
-  AreYouThere    = 0xAA,
-  Stop           = 0x01,
-  Start          = 0x02,
-  Start14        = 0x04,
-  NewPeriod      = 0x11,
-  RadioInfo      = 0x21,
-  StopSending    = 0x81
+    AreYouThere    = 0xAA,
+    Stop           = 0x01,
+    Start          = 0x02,
+    Start14        = 0x04,
+    NewGame        = 0x11,
+    RadioInfo      = 0x21,
+    Configure      = 0x31,
+    Time           = 0x41,
+    Possess        = 0x42,
+    StartSending   = 0x81,
+    StopSending    = 0x82
 };
 
 
 
 byte          command;
+byte          gameType = BASKET;// Default speciality
 
 byte          ACK  = byte(0xFF);
 byte          EOS  = byte(127);
 byte          ack  = ACK;
 
-byte          inputString[255];        // an array to hold incoming data
-int           nChar=0;
-boolean       stringComplete = false;  // whether the string is complete
+byte          startMarker    = byte(0xFF);
+byte          endMarker      = byte(0xFE);
+byte          specialByte    = byte(0xFD);
+
+int           maxMessageLen  = 64;
+byte          inputString[64];
+byte          outputString[64];
+byte          decodedString[64];
+int           decodedLength;
+int           nReceivedChar;
+int           commandLength;
+
+boolean       inProgress     = false;
+boolean       startFound     = false;
+boolean       allReceived    = false;
+
 long          baudRate       = 115200;
 
 volatile bool bSendTime = false;
+
 long          msec;
 long          elapsed;
 long          iDiv= 50;
@@ -109,6 +140,7 @@ unsigned long endPosSigDur  = 1000UL;
 unsigned      endGamToneFrq = 440;
 unsigned long endGamSigDur  = 3000UL;
 
+
 // Radio Hardware configuration
 RF24 radio(9, 10); // Set up nRF24L01 radio on SPI bus plus pins 9(CE) & 10(CSN)                                   
 const byte interruptPin = 2;
@@ -123,6 +155,7 @@ byte address[][5] = { 0x01,0x23,0x45,0x67,0x89,
 void 
 setup() {
     Serial.begin(baudRate, SERIAL_8N1); // initialize serial: 8 data bits, no parity, one stop bit.
+    
     bSendTime = false;
     bPlaying = false;
     
@@ -209,11 +242,8 @@ check_radio(void) {
         }
     }
 
-    if(fail) {                                       // Have we failed to transmit?
-        for(int i=0; i<4; i++) {
-            digitalWrite(endPossessPin, digitalRead(endPossessPin) ^ 1);
-            delay(500);
-        }
+    if(fail) { // Have we failed to transmit?
+        errorSignal();
     }
 
     if(rx || radio.available()) { // Did we receive a message?   
@@ -256,82 +286,201 @@ check_radio(void) {
 
 void 
 loop() {
-  serialEvent(); //call the function
-  if(stringComplete) {
-    executeCommand(inputString);
-    nChar = 0;
-    stringComplete = false;
-  }
-  elapsed = millis();
-  if (bSendTime && (elapsed-msec >= iDiv)) {
-      long val = possessTime;
-      for(int i=0; i<4; i++) {
-          Serial.write(val & 0xFF);
-          val = val >> 8;
-      }   
-      val = playTime;
-      if(val == 0)
-        bSendTime = false;  
-      for(int i=0; i<4; i++) {
-          Serial.write(val & 0xFF);
-          val = val >> 8;
-      }
-      msec += iDiv;
-  }
-}
-
-
-// SerialEvent occurs whenever a new data comes in the hardware serial RX.
-// This routine is run between each time loop() runs, so using delay inside loop can delay response.
-// Multiple bytes of data may be available.
-void 
-serialEvent() {
-    while(Serial.available()) {
-        byte inChar = (byte)Serial.read();
-        inputString[nChar++] = inChar;
-        if (inChar == (byte)EOS) {
-            stringComplete = true;
+    serialEvent();
+    if(allReceived) {
+        executeCommand();
+        allReceived = false;
+    }
+    elapsed = millis();
+    if (bSendTime && (elapsed-msec >= iDiv)) {
+        sendTime();
+        if(gameType == BASKET) {
+            sendPossess();
         }
+        msec += iDiv;
     }
 }
 
 
 void
-executeCommand(byte* inputString) {
-    command = inputString[0];
-    if(command == byte(AreYouThere)) {// Are you ? 
-        Serial.write(byte(ACK));
-        delay(1000);// Don't start sendig immediately
-        bSendTime = true;
-        return;
-    }
-
-    else if(command == byte(NewPeriod)) {
-        digitalWrite(endGamePin, LOW);
-        digitalWrite(endPossessPin, LOW);
-        if(nChar > 2) {
-            playTime = long(inputString[1]) * 60L * 100L;
-            possessTime = long(inputString[2]) * 100L;
-            bSendTime = true;
+sendTime() {
+    byte currentByte;
+    // Prepare header and command
+    outputString[0] = startMarker;
+    outputString[2] = Time;
+    
+    long playTimeValue = playTime;
+    int nBytes = 3;
+    for(int i=0; i<4; i++) {
+        currentByte = byte(playTimeValue & 0xFF);
+        if(currentByte >= specialByte) {
+            outputString[nBytes++] = specialByte;
+            outputString[nBytes++] = byte(currentByte-specialByte);
         }
         else {
-            Serial.write(byte(EOS));
+            outputString[nBytes++] = currentByte;
         }
-        return;
+        playTimeValue = playTimeValue >> 8;
     }
-
-    else if(command == char(StopSending)) {
-        bSendTime = false; 
-        digitalWrite(endPossessPin, LOW);
-        return;
+    outputString[nBytes++] = endMarker;
+    outputString[1] = nBytes;
+    for(int i=0; i<outputString[1]; i++) {
+        Serial.write(byte(outputString[i]));
     }
-    
-//    else {
-//        while(true) {
-//            digitalWrite(endPossessPin, digitalRead(endPossessPin) ^ 1);
-//            delay(100);
-//        }
-//    }
 }
 
+
+void
+sendPossess() {
+    byte currentByte;
+    long PossessValue = 0;
+    int nBytes = 3;
+    outputString[2] = Possess;
+    PossessValue = possessTime;
+    for(int i=0; i<4; i++) {
+        currentByte = byte(PossessValue & 0xFF);
+        if(currentByte >= specialByte) {
+            outputString[nBytes++] = specialByte;
+            outputString[nBytes++] = byte(currentByte-specialByte);
+        }
+        else {
+            outputString[nBytes++] = currentByte;
+        }
+        PossessValue = PossessValue >> 8;
+    }
+    outputString[nBytes++] = endMarker;
+    outputString[1] = nBytes;
+    for(int i=0; i<outputString[1]; i++) {
+        Serial.write(byte(outputString[i]));
+    }
+}
+
+
+// SerialEvent occurs whenever a new data comes in the
+// hardware serial RX.
+// This routine is run between each time loop() runs, 
+// so using delay inside loop can delay response.
+// Multiple bytes of data may be available.
+void 
+serialEvent() {
+    while(Serial.available()) {
+        byte inChar = (byte)Serial.read();
+        if(inChar == startMarker) {
+            nReceivedChar = 0;
+            inProgress = true;
+        }
+        if(inProgress) {
+            inputString[nReceivedChar] = inChar;
+            nReceivedChar++;
+        }
+        if(nReceivedChar == maxMessageLen) {
+            errorSignal();
+        }
+        if(inChar == endMarker) {
+            allReceived = true;
+            commandLength = nReceivedChar;
+            inProgress = false;
+            return;
+        }
+    }
+}
+
+
+void 
+decodeCommand(byte *decoded) {
+    decodedLength = 0;
+    for(int i=1; i<commandLength-1; i++) {
+        if(inputString[i] == specialByte) {
+            i++;
+            decoded[decodedLength] = byte(specialByte + inputString[i]); 
+        }
+        else {
+            decoded[decodedLength] = byte(inputString[i]);
+        }
+        decodedLength++;
+    }
+}
+
+
+bool
+executeCommand() {
+    decodeCommand(decodedString);
+    command = decodedString[1];
+    
+    if(command == byte(AreYouThere)) {// Are you there ? 
+        outputString[0] = startMarker;
+        outputString[1] = byte(4);// Total Command length
+        outputString[2] = byte(AreYouThere);// The command
+        outputString[3] = endMarker;
+        for(int i=0; i<outputString[1]; i++) {
+            Serial.write(byte(outputString[i]));
+        }
+        return true;
+    }
+
+    if(command == byte(Configure)) {
+        if(decodedLength < 2) {// Bad command received: discard and go further
+            errorSignal();
+            return false;
+        }
+        gameType = decodedString[2];
+        if(gameType == byte(BASKET)) {
+            if(decodedLength < 9) {// Bad command received: discard and go further
+                errorSignal();
+                return false;
+            }
+            playTime       = long(decodedString[3]) + (long(decodedString[4]) << 8);// Get play time in seconds
+            playTime      *=  100L;                                                // and transforms in cents of seconds 
+            possessTime24  = long(decodedString[5]) + (long(decodedString[6]) << 8);// Get possess time (24) in seconds
+            possessTime24 *=  100L;                                                // and transforms in cents of seconds 
+            possessTime14  = long(decodedString[7]) + (long(decodedString[8]) << 8);// Get possess time (14) in seconds
+            possessTime14 *=  100L;                                                // and transforms in cents of seconds 
+        }
+        else if(gameType == byte(HANDBALL)) {
+            if(decodedLength < 5) {// Bad command received: discard and go further
+                errorSignal();
+                return false;
+            }
+            playTime       = long(decodedString[3]) + (long(decodedString[4]) << 8);// Get play time in seconds
+            playTime      *=  100L;                                                // and transforms in cents of seconds 
+            possessTime24  = playTime; // There is no possess time in Handball so making it equal to the play Time
+            possessTime14  = playTime; // we ensure that the end of the possess will be at end of the game
+        }
+        possessTime = possessTime24;
+        digitalWrite(endPossessPin, LOW);
+        sendTime();
+        sendPossess();
+        return true;
+    }
+
+    else if(command == byte(StopSending)) {
+        bSendTime = false;
+        return true;
+    }
+
+    else if(command == byte(StartSending)) {
+        bSendTime = true;
+        return true;
+    }
+
+    else if(command == byte(NewGame)) {
+        digitalWrite(endGamePin, LOW);
+        return true;
+    }
+    
+    else {
+        errorSignal();
+    }
+    return false;
+}
+
+
+void
+errorSignal() {
+    for(int i=0; i<25; i++) {
+        digitalWrite(endPossessPin, digitalRead(endPossessPin) ^ 1);
+        delay(40);
+    }
+    digitalWrite(endPossessPin, LOW);
+}
 
