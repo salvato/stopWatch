@@ -123,7 +123,7 @@ volatile bool bSendTime = false;
 
 long          msec;
 long          elapsed;
-long          iDiv= 50;
+long          iDiv= 100;// dieci letture/s
 
 volatile bool bPlaying;          
 long          possessTime24;
@@ -193,13 +193,12 @@ setup() {
     radio.setPALevel(RF24_PA_MAX);
     radio.setDataRate(RF24_250KBPS);
 
-    radio.enableAckPayload();                         // We will be using the Ack Payload feature, so please enable it
-    radio.enableDynamicPayloads();                    // Ack payloads are dynamic payloads
+    radio.enableDynamicPayloads();// Enable dynamically-sized payloads
+    radio.setAutoAck(false);      // Disable Auto Ack   
                                                       
     radio.openWritingPipe(address[1]);                // Open pipes to other node for communication
     radio.openReadingPipe(1, address[0]);
     radio.startListening();
-    radio.writeAckPayload(1, &ack, sizeof(ack));      // Add an ack packet for the next time around.
     
     // Attach interrupt handler to interrupt #0
     // (using pin D2) on BOTH the sender and receiver
