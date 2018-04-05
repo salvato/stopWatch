@@ -234,8 +234,8 @@ check_radio(void) {
     bool tx, fail, rx;
     radio.whatHappened(tx, fail, rx);// What happened?
       
-    if(!tx) {// Have we a transmision error ?
-        for(int i=0; i<2; i++) {
+    if(tx) {// Have godd transmision
+//        for(int i=0; i<2; i++) {
             digitalWrite(endPossessPin, digitalRead(endPossessPin) ^ 1);
             delay(500);
         }
