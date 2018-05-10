@@ -233,18 +233,14 @@ void
 check_radio(void) {
     bool tx, fail, rx;
     radio.whatHappened(tx, fail, rx);// What happened?
-      
+ /*     
     if(tx) {// Have godd transmision
-//        for(int i=0; i<2; i++) {
+        for(int i=0; i<2; i++) {
             digitalWrite(endPossessPin, digitalRead(endPossessPin) ^ 1);
             delay(500);
         }
     }
-
-    if(fail) { // Have we failed to transmit?
-        errorSignal();
-    }
-
+*/
     if(rx || radio.available()) { // Did we receive a message?   
         static char got_cmd; // Get this payload and dump it
         radio.read(&got_cmd, sizeof(got_cmd));
@@ -279,6 +275,11 @@ check_radio(void) {
             interrupts(); 
         }
         radio.writeAckPayload(1, &ack, sizeof(ack));      // Add an ack packet for the next time around.
+        return;
+    }
+    
+    if(fail) { // Have we failed to transmit?
+        errorSignal();
     }
 }
 
