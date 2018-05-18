@@ -80,9 +80,9 @@ void sendPossess();
 
 enum commands {
     AreYouThere    = 0xAA,
-    Stop           = 0x01,
-    Start          = 0x02,
-    Start14        = 0x04,
+    Stop           = 0x08,
+    Start          = 0x10,
+    Start14        = 0x20,
     NewGame        = 0x11,
     RadioInfo      = 0x21,
     Configure      = 0x31,
