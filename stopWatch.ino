@@ -144,8 +144,9 @@ unsigned long endGamSigDur  = 3000UL;
 // Radio Hardware configuration
 RF24 radio(9, 10); // Set up nRF24L01 radio on SPI bus plus pins 9(CE) & 10(CSN)                                   
 const byte interruptPin = 2;
-byte address[][5] = { 0x01,0x23,0x45,0x67,0x89, 
-                      0x01,0x23,0x45,0x67,0x89
+byte address[][5] = { 
+                        0x01,0x23,0x45,0x67,0x89, 
+                        0x89,0x67,0x45,0x23,0x01
                     };
 
 /////////////////////////////////////////////////////////////////////
@@ -192,9 +193,13 @@ setup() {
     radio.begin();
     radio.setPALevel(RF24_PA_MAX);
     radio.setDataRate(RF24_250KBPS);
+    // 0 <= Channel <= 127
+    radio.setChannel(76);
 
-    radio.enableDynamicPayloads();// Enable dynamically-sized payloads
-    radio.setAutoAck(false);      // Disable Auto Ack   
+    // Disable Auto Ack
+    radio.setAutoAck(false);
+    radio.setPayloadSize(1);
+    radio.setCRCLength(RF24_CRC_16);     
                                                       
     radio.openWritingPipe(address[1]);                // Open pipes to other node for communication
     radio.openReadingPipe(1, address[0]);
@@ -237,13 +242,14 @@ check_radio(void) {
     if(tx) {// Have godd transmision
         for(int i=0; i<2; i++) {
             digitalWrite(endPossessPin, digitalRead(endPossessPin) ^ 1);
-            delay(500);
+            delay(100);
         }
     }
 */
     if(rx || radio.available()) { // Did we receive a message?   
         static char got_cmd; // Get this payload and dump it
         radio.read(&got_cmd, sizeof(got_cmd));
+
         if(got_cmd == Stop) {
             noInterrupts();
             bPlaying = false;
